@@ -25,6 +25,7 @@ providers such as [SendGrid][sendgrid]. PRs welcome to support other providers.
 | `MAILHOOK_ALLOWEDEMAILS`     | Comma separated list of email addresses allowed to upload documents     |
 | `MAILHOOK_TOADDRESS`         | Optional, require incoming emails to be addressed to this email address |
 | `MAILHOOK_HTTPHOST`          | Optional, host to listen for requests on, defaults to `127.0.0.1:5000`  |
+| `MAILHOOK_DEBUG`             | Optional, set to true for more verbose logging                          |
 
 ### SendGrid
 
@@ -58,7 +59,7 @@ services:
   paperless-mailhook:
     image: ghcr.io/syfaro/paperless-mailhook:latest
     ports:
-      - '5000:5000'
+      - "5000:5000"
     environment:
       MAILHOOK_PAPERLESSENDPOINT: http://paperless:8000
       MAILHOOK_PAPERLESSAPIKEY: abc123

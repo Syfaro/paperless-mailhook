@@ -32,6 +32,7 @@ type Config struct {
 	ToAddress     string
 
 	HttpHost string `default:"127.0.0.1:5000"`
+	Debug    bool
 }
 
 type SendGridEnvelope struct {
@@ -139,6 +140,7 @@ func (handler *emailHandler) uploadContents(email *email.Email) error {
 		}
 
 		req := gotenberg.NewHTMLRequest(index)
+		req.WaitTimeout(30)
 		resp, err = handler.gotenbergClient.Post(req)
 		if err != nil {
 			return err
@@ -150,12 +152,17 @@ func (handler *emailHandler) uploadContents(email *email.Email) error {
 		}
 
 		req := gotenberg.NewOfficeRequest(index)
+		req.WaitTimeout(30)
 		resp, err = handler.gotenbergClient.Post(req)
 		if err != nil {
 			return err
 		}
 	} else {
 		return errors.New("email was empty")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("got wrong gotenberg status code: %d", resp.StatusCode)
 	}
 
 	filename := "Email.pdf"
@@ -295,6 +302,12 @@ func main() {
 	var cfg Config
 	if err := envconfig.Process("mailhook", &cfg); err != nil {
 		log.Fatal(err.Error())
+	}
+
+	if cfg.Debug {
+		log.SetLevel(log.TraceLevel)
+	} else {
+		log.SetLevel(log.InfoLevel)
 	}
 
 	var gotenbergClient *gotenberg.Client = nil
