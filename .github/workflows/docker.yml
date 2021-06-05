@@ -1,0 +1,17 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build Docker image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login https://ghcr.io -u ${GITHUB_ACTOR} --password-stdin
+          docker build -t ghcr.io/syfaro/paperless-mailhook:latest .
+          docker push ghcr.io/syfaro/paperless-mailhook:latest
