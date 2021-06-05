@@ -36,3 +36,32 @@ service is available. SendGrid must be set to send the raw email.
 [paperless-ng]: https://github.com/jonaswinkler/paperless-ng
 [sendgrid]: https://sendgrid.com/docs/ui/account-and-settings/inbound-parse/
 [gotenberg]: https://github.com/thecodingmachine/gotenberg
+
+## Docker
+
+You can run this using Docker. An image is published at
+`ghcr.io/syfaro/paperless-mailhook`.
+
+```bash
+docker run -p 5000:5000 \
+    -e MAILHOOK_PAPERLESSENDPOINT=http://paperless:8000 \
+    -e MAILHOOK_PAPERLESSAPIKEY=abc123 \
+    -e MAILHOOK_GOTENBERGENDPOINT=http://gotenberg:3000 \
+    -e MAILHOOK_ALLOWEDEMAILS=syfaro@huefox.com \
+    ghcr.io/syfaro/paperless-mailhook:latest
+```
+
+### docker-compose
+
+```yaml
+services:
+  paperless-mailhook:
+    image: ghcr.io/syfaro/paperless-mailhook:latest
+    ports:
+      - '5000:5000'
+    environment:
+      MAILHOOK_PAPERLESSENDPOINT: http://paperless:8000
+      MAILHOOK_PAPERLESSAPIKEY: abc123
+      MAILHOOK_GOTENBERGENDPOINT: http://gotenberg:3000
+      MAILHOOK_ALLOWEDEMAILS: syfaro@huefox.com
+```
