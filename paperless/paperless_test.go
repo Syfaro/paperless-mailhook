@@ -2,17 +2,28 @@ package paperless
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
 	Endpoint    = "http://paperless:3000"
 	APIKeyValue = "apiKeyValue"
+
+	DocumentFilename = "paperlessDocumentFilename"
+	DocumentContents = "paperlessDocumentContents"
+)
+
+var (
+	DocumentTags = []int{1, 2}
 )
 
 func TestNew(t *testing.T) {
@@ -74,4 +85,46 @@ func TestResolveTag(t *testing.T) {
 	tagID, err = paperless.ResolveTag("test2")
 	assert.Equal(t, -1, tagID, "unresolved tag should have correct ID")
 	assert.Equal(t, err, errBadTag, "unresolved tag should have expected error")
+}
+
+func TestUploadDocument(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "/api/documents/post_document/", req.URL.Path, "uploading documents should use correct url")
+
+		req.ParseMultipartForm(1024 * 1024 * 10)
+
+		tags := req.MultipartForm.Value["tags"]
+		require.Len(t, tags, len(DocumentTags), "document should have correct number of tags")
+
+		var tagIDs []int
+		for _, tag := range tags {
+			tagID, err := strconv.Atoi(tag)
+			assert.Nil(t, err, "each tag should be valid number")
+			tagIDs = append(tagIDs, tagID)
+		}
+
+		assert.Equal(t, DocumentTags, tagIDs, "tag IDs should be the same")
+
+		documents := req.MultipartForm.File["document"]
+		require.Len(t, documents, 1, "only one document should be uploaded at a time")
+		document := documents[0]
+
+		assert.Equal(t, DocumentFilename, document.Filename, "document filename should be the same")
+
+		f, err := document.Open()
+		require.Nil(t, err, "should not have errors opening document file")
+		data, err := io.ReadAll(f)
+		require.Nil(t, err, "should be able to read document contents")
+
+		assert.Equal(t, DocumentContents, string(data), "document should contain same data as uploaded")
+
+		fmt.Fprint(w, "OK")
+	}))
+	defer ts.Close()
+
+	paperless := New(ts.URL, APIKeyValue, http.DefaultClient)
+
+	r := strings.NewReader(DocumentContents)
+	err := paperless.UploadDocument(r, DocumentFilename, DocumentTags)
+	assert.Nil(t, err, "document should upload without errors")
 }
