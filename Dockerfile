@@ -1,7 +1,7 @@
 FROM golang:1.16-alpine AS builder
 WORKDIR /go/src/app
 COPY . .
-RUN go build -v ./...
+RUN go build -v -o paperless-mailhook
 
 FROM alpine
 EXPOSE 5000
