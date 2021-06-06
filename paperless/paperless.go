@@ -26,6 +26,15 @@ type Paperless struct {
 	Client HTTPClient
 }
 
+type PaperlessError struct {
+	Message string
+	Body    []byte
+}
+
+func (err PaperlessError) Error() string {
+	return err.Message
+}
+
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
@@ -58,8 +67,8 @@ func (c *httpClient) Do(req *http.Request) (*http.Response, error) {
 // UploadDocument uploads a document to the given Paperless instance with the
 // provided filename and tag IDs.
 func (paperless *Paperless) UploadDocument(r io.Reader, filename string, tags []int) error {
-	ctxLog := log.WithField("filename", filename)
-	ctxLog.Debug("uploading file to paperless")
+	logCtx := log.WithField("filename", filename)
+	logCtx.Debug("uploading file to paperless")
 
 	buf := &bytes.Buffer{}
 	body := multipart.NewWriter(buf)
@@ -95,7 +104,15 @@ func (paperless *Paperless) UploadDocument(r io.Reader, filename string, tags []
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("got bad paperless status code: %d", resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logCtx.Errorf("could not read paperless error response")
+		}
+
+		return &PaperlessError{
+			Message: fmt.Sprintf("got bad paperless status code: %d", resp.StatusCode),
+			Body:    body,
+		}
 	}
 
 	return nil
