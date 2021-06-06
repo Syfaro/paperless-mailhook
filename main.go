@@ -10,7 +10,9 @@ import (
 	"mime/quotedprintable"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/kelseyhightower/envconfig"
 
@@ -24,6 +26,12 @@ import (
 
 const MaxMemory = 1024 * 1024 * 10
 const UserAgent = "Paperless_Mailhook/1.0 (https://github.com/Syfaro/paperless-mailhook)"
+
+var (
+	incomingEmails      = metrics.NewCounter("paperless_mailhook_incoming_emails_total")
+	filteredEmails      = metrics.NewCounter("paperless_mailhook_filtered_emails_total")
+	emailProcessingTime = metrics.NewHistogram("paperless_mailhook_email_processing_seconds")
+)
 
 type Config struct {
 	PaperlessEndpoint string `required:"true"`
@@ -162,6 +170,9 @@ func (handler *emailHandler) emlFile(r io.Reader) error {
 }
 
 func (handler *emailHandler) sendGrid(w http.ResponseWriter, req *http.Request) {
+	start := time.Now()
+	incomingEmails.Inc()
+
 	if err := req.ParseMultipartForm(MaxMemory); err != nil {
 		log.Errorf("unable to parse incoming email: %s", err.Error())
 
@@ -207,6 +218,7 @@ func (handler *emailHandler) sendGrid(w http.ResponseWriter, req *http.Request) 
 
 	if !found {
 		logCtx.Warnf("email was from unknown sender, ignoring")
+		filteredEmails.Inc()
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "OK")
@@ -225,6 +237,7 @@ func (handler *emailHandler) sendGrid(w http.ResponseWriter, req *http.Request) 
 
 		if !found {
 			logCtx.Warnf("email was not addressed to correct email, ignoring")
+			filteredEmails.Inc()
 
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintf(w, "OK")
@@ -263,6 +276,8 @@ func (handler *emailHandler) sendGrid(w http.ResponseWriter, req *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "OK")
+
+	emailProcessingTime.UpdateDuration(start)
 }
 
 func resolveTags(paperless *paperless.Paperless, tags []string) ([]int, error) {
@@ -312,6 +327,9 @@ func main() {
 	http.HandleFunc("/sendgrid", emailHandler.sendGrid)
 	http.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		fmt.Fprint(w, "OK")
+	})
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
+		metrics.WritePrometheus(w, true)
 	})
 
 	log.Infof("starting http server on %s", cfg.HTTPHost)
