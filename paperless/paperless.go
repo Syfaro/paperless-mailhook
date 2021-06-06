@@ -102,6 +102,7 @@ func (paperless *Paperless) UploadDocument(r io.Reader, filename string, tags []
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
@@ -139,6 +140,7 @@ func (paperless *Paperless) ResolveTag(tag string) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	defer resp.Body.Close()
 
 	var results tagResults
 	decoder := json.NewDecoder(resp.Body)

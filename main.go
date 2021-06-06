@@ -62,7 +62,7 @@ func main() {
 
 	paperless := paperless.New(cfg.PaperlessEndpoint, cfg.PaperlessAPIKey, client)
 
-	var gotenbergClient *gotenberg.Client = nil
+	var gotenbergClient *gotenberg.Client
 	if cfg.GotenbergEndpoint != "" {
 		log.Info("found gotenberg endpoint, enabling")
 		gotenbergClient = &gotenberg.Client{Hostname: cfg.GotenbergEndpoint, HTTPClient: client}
@@ -85,7 +85,9 @@ func main() {
 	})
 
 	log.Infof("starting http server on %s", cfg.HTTPHost)
-	http.ListenAndServe(cfg.HTTPHost, nil)
+	if err = http.ListenAndServe(cfg.HTTPHost, nil); err != nil {
+		log.Fatalf("could not start http server: %s", err.Error())
+	}
 }
 
 type EmailHandler struct {
@@ -174,7 +176,7 @@ func (handler *EmailHandler) UploadContent(email *email.Email) error {
 	})
 	logCtx.Info("converting email to pdf")
 
-	var resp *http.Response = nil
+	var resp *http.Response
 	if email.HTML != nil {
 		index, err := gotenberg.NewDocumentFromBytes("index.html", email.HTML)
 		if err != nil {
@@ -187,6 +189,7 @@ func (handler *EmailHandler) UploadContent(email *email.Email) error {
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 	} else if email.Text != nil {
 		index, err := gotenberg.NewDocumentFromBytes("index.txt", email.Text)
 		if err != nil {
@@ -199,6 +202,7 @@ func (handler *EmailHandler) UploadContent(email *email.Email) error {
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 	} else {
 		return errors.New("email was empty")
 	}
@@ -303,7 +307,7 @@ func (handler *EmailHandler) sendGrid(w http.ResponseWriter, req *http.Request) 
 
 // ResolveTags attempts to convert values of tags into their corresponding IDs.
 func ResolveTags(paperless *paperless.Paperless, tags []string) ([]int, error) {
-	var tagIDs []int
+	tagIDs := make([]int, 0, len(tags))
 
 	for _, tag := range tags {
 		tagID, err := paperless.ResolveTag(tag)
@@ -327,7 +331,7 @@ func IsQuotedPrintable(content []byte) bool {
 	buf := make([]byte, 1024)
 	for {
 		if _, err := qp.Read(buf); err != nil {
-			return err == io.EOF
+			return errors.Is(err, io.EOF)
 		}
 	}
 }

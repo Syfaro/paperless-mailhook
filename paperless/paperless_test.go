@@ -44,7 +44,8 @@ func TestHTTPClient(t *testing.T) {
 
 	client := httpClient{http.DefaultClient, APIKeyValue}
 	req, _ := http.NewRequest(http.MethodGet, ts.URL, nil)
-	_, _ = client.Do(req)
+	resp, _ := client.Do(req)
+	resp.Body.Close()
 
 	var authValue string
 	select {
@@ -91,7 +92,8 @@ func TestUploadDocument(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		assert.Equal(t, "/api/documents/post_document/", req.URL.Path, "uploading documents should use correct url")
 
-		req.ParseMultipartForm(1024 * 1024 * 10)
+		err := req.ParseMultipartForm(1024 * 1024 * 10)
+		require.Nil(t, err, "must not have error parsing sent multipart form")
 
 		tags := req.MultipartForm.Value["tags"]
 		require.Len(t, tags, len(DocumentTags), "document should have correct number of tags")
