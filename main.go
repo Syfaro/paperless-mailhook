@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/http"
+	"net/url"
 	"strings"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -22,16 +23,18 @@ import (
 )
 
 const MaxMemory = 1024 * 1024 * 10
+const UserAgent = "Paperless_Mailhook/1.0 (https://github.com/Syfaro/paperless-mailhook)"
 
 type Config struct {
 	PaperlessEndpoint string `required:"true"`
-	PaperlessApiKey   string `required:"true"`
+	PaperlessAPIKey   string `required:"true"`
+	PaperlessTags     []string
 	GotenbergEndpoint string
 
 	AllowedEmails []string `required:"true"`
 	ToAddress     string
 
-	HttpHost string `default:"127.0.0.1:5000"`
+	HTTPHost string `default:"127.0.0.1:5000"`
 	Debug    bool
 }
 
@@ -42,6 +45,7 @@ type SendGridEnvelope struct {
 
 type emailHandler struct {
 	cfg             Config
+	tags            []int
 	client          *http.Client
 	gotenbergClient *gotenberg.Client
 }
@@ -61,6 +65,12 @@ func (handler *emailHandler) uploadDocument(r io.Reader, filename string) error 
 		return err
 	}
 
+	for _, tag := range handler.tags {
+		if err = body.WriteField("tags", fmt.Sprint(tag)); err != nil {
+			return err
+		}
+	}
+
 	if err = body.Close(); err != nil {
 		return err
 	}
@@ -70,7 +80,7 @@ func (handler *emailHandler) uploadDocument(r io.Reader, filename string) error 
 		return err
 	}
 
-	req.Header.Add("Authorization", fmt.Sprintf("Token %s", handler.cfg.PaperlessApiKey))
+	req.Header.Add("Authorization", fmt.Sprintf("Token %s", handler.cfg.PaperlessAPIKey))
 	req.Header.Add("Content-Type", body.FormDataContentType())
 
 	resp, err := handler.client.Do(req)
@@ -120,7 +130,7 @@ func (handler *emailHandler) uploadAttachments(attachments []*email.Attachment) 
 		}
 
 		if err := handler.uploadDocument(content, file.Filename); err != nil {
-			logCtx.Error("unable to upload document: %s", err.Error())
+			logCtx.Errorf("unable to upload document: %s", err.Error())
 
 			continue
 		}
@@ -298,6 +308,66 @@ func (handler *emailHandler) sendGrid(w http.ResponseWriter, req *http.Request) 
 	fmt.Fprintf(w, "OK")
 }
 
+type tagResults struct {
+	Results []struct {
+		ID int `json:"id"`
+	} `json:"results"`
+}
+
+func resolveTags(cfg Config, client *http.Client, tags []string) ([]int, error) {
+	var tagIDs []int
+
+	for _, tag := range tags {
+		logCtx := log.WithField("tag", tag)
+		logCtx.Debug("looking up tag")
+
+		endpoint := fmt.Sprintf("%s/api/tags/?name__iexact=%s", cfg.PaperlessEndpoint, url.QueryEscape(tag))
+		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Add("Authorization", fmt.Sprintf("Token %s", cfg.PaperlessAPIKey))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		var results tagResults
+		decoder := json.NewDecoder(resp.Body)
+		if err = decoder.Decode(&results); err != nil {
+			return nil, err
+		}
+
+		if len(results.Results) != 1 {
+			logCtx.Fatalf("unable to look up tag")
+		}
+
+		logCtx.Tracef("resolved tag to ID %d", results.Results[0].ID)
+
+		tagIDs = append(tagIDs, results.Results[0].ID)
+	}
+
+	return tagIDs, nil
+}
+
+type addHeaderTransport struct {
+	T http.RoundTripper
+}
+
+func (aht *addHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Add("User-Agent", UserAgent)
+	return aht.T.RoundTrip(req)
+}
+
+func newAddHeaderTransport(T http.RoundTripper) *addHeaderTransport {
+	if T == nil {
+		T = http.DefaultTransport
+	}
+
+	return &addHeaderTransport{T}
+}
+
 func main() {
 	var cfg Config
 	if err := envconfig.Process("mailhook", &cfg); err != nil {
@@ -310,21 +380,26 @@ func main() {
 		log.SetLevel(log.InfoLevel)
 	}
 
+	client := &http.Client{Transport: newAddHeaderTransport(nil)}
+
 	var gotenbergClient *gotenberg.Client = nil
 	if cfg.GotenbergEndpoint != "" {
 		log.Info("found gotenberg endpoint, enabling")
-		gotenbergClient = &gotenberg.Client{Hostname: cfg.GotenbergEndpoint}
+		gotenbergClient = &gotenberg.Client{Hostname: cfg.GotenbergEndpoint, HTTPClient: client}
 	}
 
-	emailHandler := emailHandler{cfg, http.DefaultClient, gotenbergClient}
+	tags, err := resolveTags(cfg, client, cfg.PaperlessTags)
+	if err != nil {
+		log.Fatalf("could not resolve tags: %s", err.Error())
+	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	emailHandler := emailHandler{cfg, tags, client, gotenbergClient}
 
-		fmt.Fprintf(w, "doesn't look like anything to me")
-	})
 	http.HandleFunc("/sendgrid", emailHandler.sendGrid)
+	http.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
+		fmt.Fprint(w, "OK")
+	})
 
-	log.Infof("starting http server on %s", cfg.HttpHost)
-	http.ListenAndServe(cfg.HttpHost, nil)
+	log.Infof("starting http server on %s", cfg.HTTPHost)
+	http.ListenAndServe(cfg.HTTPHost, nil)
 }
