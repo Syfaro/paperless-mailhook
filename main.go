@@ -88,11 +88,6 @@ func main() {
 	http.ListenAndServe(cfg.HTTPHost, nil)
 }
 
-type SendGridEnvelope struct {
-	To   []string `json:"to"`
-	From string   `json:"from"`
-}
-
 type EmailHandler struct {
 	AllowList
 	Tags []int
@@ -225,6 +220,14 @@ func (handler *EmailHandler) UploadContent(email *email.Email) error {
 	return nil
 }
 
+// sendGridEnvelope is the envelope data included in the webhook by SendGrid.
+type sendGridEnvelope struct {
+	To   []string `json:"to"`
+	From string   `json:"from"`
+}
+
+// sendGrid handles incoming HTTP requests from SendGrid and processes the
+// associated email.
 func (handler *EmailHandler) sendGrid(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	incomingEmails.Inc()
@@ -248,9 +251,9 @@ func (handler *EmailHandler) sendGrid(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	var envelope SendGridEnvelope
+	var envelope sendGridEnvelope
 	if err := json.Unmarshal([]byte(envelopeValue[0]), &envelope); err != nil {
-		log.Errorf("email envelope was not expected json")
+		log.Errorf("email envelope was not expected json: %s", err.Error())
 
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "bad envelope: %s", err.Error())
@@ -323,9 +326,7 @@ func IsQuotedPrintable(content []byte) bool {
 	// Read up to 1024 bytes at a time, returning as soon as an error is found.
 	buf := make([]byte, 1024)
 	for {
-		_, err := qp.Read(buf)
-
-		if err != nil {
+		if _, err := qp.Read(buf); err != nil {
 			return err == io.EOF
 		}
 	}
